@@ -26,6 +26,7 @@
 #include "../common/unicode_common.h"
 #include "base.h"
 #include "simd.h"
+#include "sonic/dom/flags.h"
 
 namespace sonic_json {
 namespace internal {
@@ -36,10 +37,17 @@ using sonic_json::internal::common::handle_unicode_codepoint;
 struct StringBlock {
  public:
   sonic_force_inline static StringBlock Find(const uint8_t* src);
-  sonic_force_inline static StringBlock Find(uint8x16_t& v);
+  sonic_force_inline static StringBlock Find(const svuint8x16_t& v);
   // has quote, and no backslash or unescaped before it
+  template <ParseFlags parseFlags>
   sonic_force_inline bool HasQuoteFirst() const {
-    return (bs_index > quote_index) && !HasUnescaped();
+    constexpr bool kAllowUnescapedControlChars =
+        (parseFlags & ParseFlags::kParseAllowUnescapedControlChars) != 0;
+    if constexpr (kAllowUnescapedControlChars) {
+      return (bs_index > quote_index);
+    } else {
+      return (bs_index > quote_index) && (!HasUnescaped());
+    }
   }
   // has backslash, and no quote before it
   sonic_force_inline bool HasBackslash() const {
@@ -89,14 +97,10 @@ sonic_force_inline unsigned locate_token_le(const svuint8x16_t v, char token) {
 
 sonic_force_inline StringBlock StringBlock::Find(const uint8_t* src) {
   svuint8x16_t v = svld1(svptrue_b8(), src);
-  return {
-      locate_token(v, '\\'),
-      locate_token(v, '"'),
-      locate_token_le(v, '\x1f'),
-  };
+  return Find(v);
 }
 
-sonic_force_inline StringBlock StringBlock::Find(uint8x16_t& v) {
+sonic_force_inline StringBlock StringBlock::Find(const svuint8x16_t& v) {
   return {
       locate_token(v, '\\'),
       locate_token(v, '"'),
